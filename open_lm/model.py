@@ -69,6 +69,8 @@ class Params:
     ffn_type: str = "swiglu"
 
 
+
+
 def xformers_attn(queries, keys, values, is_causal):
     # xformers assumes q, k, v are [batch, seq_len, heads, embed_dim]
     mask = None
@@ -195,36 +197,36 @@ class Block(nn.Module):
 
 
 class Transformer(nn.Module, PyTorchModelHubMixin):
-    def __init__(self, params: Params):
+    def __init__(self, config: Params):
         super().__init__()
         # for convenience we often share param names with llama
-        self.config = params
-        self.vocab_size = params.vocab_size
-        self.n_layers = params.n_layers
-        self.seq_len = params.seq_len
-        norm_class = get_norm_class(params.norm_type)
+        self.config = config
+        self.vocab_size = config.vocab_size
+        self.n_layers = config.n_layers
+        self.seq_len = config.seq_len
+        norm_class = get_norm_class(config.norm_type)
         self.post_embed_norm = (
             norm_class(
-                params.dim,
-                eps=params.norm_eps,
+                config.dim,
+                eps=config.norm_eps,
             )
-            if params.post_embed_norm
+            if config.post_embed_norm
             else nn.Identity()
         )
-        self.weight_tying = params.weight_tying
+        self.weight_tying = config.weight_tying
 
-        self.tok_embeddings = nn.Embedding(params.vocab_size, params.dim)
+        self.tok_embeddings = nn.Embedding(config.vocab_size, config.dim)
 
         self.layers = torch.nn.ModuleList()
-        for layer_id in range(params.n_layers):
-            self.layers.append(Block(layer_id, params))
+        for layer_id in range(config.n_layers):
+            self.layers.append(Block(layer_id, config))
 
         # get class for normalization layers
         self.norm = norm_class(
-            params.dim,
-            eps=params.norm_eps,
+            config.dim,
+            eps=config.norm_eps,
         )
-        self.output = nn.Linear(params.dim, params.vocab_size, bias=False)
+        self.output = nn.Linear(config.dim, config.vocab_size, bias=False)
         if self.weight_tying:
             self.tok_embeddings.weight = self.output.weight
         self.grad_checkpointing = False
@@ -232,7 +234,7 @@ class Transformer(nn.Module, PyTorchModelHubMixin):
         # initialize weight 1/sqrt(dim)
         # this is 1/fan_in for output, as is default, and Maciej Kilian tried another option
         # for the embed layer (from RWKV paper) but this was better.
-        std = 1.0 / math.sqrt(params.dim)
+        std = 1.0 / math.sqrt(config.dim)
         torch.nn.init.trunc_normal_(self.output.weight, std=std, a=-3 * std, b=3 * std)
         torch.nn.init.trunc_normal_(
             self.tok_embeddings.weight, std=std, a=-3 * std, b=3 * std
