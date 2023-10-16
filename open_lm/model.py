@@ -54,7 +54,7 @@ _rescan_model_configs()  # initial populate of model config registry
 
 # args and default params follow llama (except with LayerNorm instead of RmsNorm)
 @dataclass
-class Params:
+class Config:
     dim: int = 512
     n_layers: int = 8
     n_heads: int = 8
@@ -78,7 +78,7 @@ def xformers_attn(queries, keys, values, is_causal):
 
 
 class CustomAttn(nn.Module):
-    def __init__(self, layer_id, args: Params):
+    def __init__(self, layer_id, args: Config):
         super().__init__()
         self.n_heads = args.n_heads
         self.head_dim = args.dim // args.n_heads
@@ -136,7 +136,7 @@ class CustomAttn(nn.Module):
 
 
 class Block(nn.Module):
-    def __init__(self, layer_id, args: Params):
+    def __init__(self, layer_id, args: Config):
         super().__init__()
         self.n_heads = args.n_heads
         self.dim = args.dim
@@ -193,35 +193,36 @@ class Block(nn.Module):
 
 
 class Transformer(nn.Module, PyTorchModelHubMixin):
-    def __init__(self, params):
+    def __init__(self, config):
         super().__init__()
         # for convenience we often share param names with llama
-        self.params = params
-        self.vocab_size = params.vocab_size
-        self.n_layers = params.n_layers
-        self.seq_len = params.seq_len
+        self.config = config
+        self.vocab_size = config.vocab_size
+        self.n_layers = config.n_layers
+        self.seq_len = config.seq_len
+        norm_class = get_norm_class(config.norm_type)
         self.post_embed_norm = (
-            params.norm_type(
-                params.dim,
-                eps=params.norm_eps,
+            norm_class(
+                config.dim,
+                eps=config.norm_eps,
             )
-            if params.post_embed_norm
+            if config.post_embed_norm
             else nn.Identity()
         )
-        self.weight_tying = params.weight_tying
+        self.weight_tying = config.weight_tying
 
-        self.tok_embeddings = nn.Embedding(params.vocab_size, params.dim)
+        self.tok_embeddings = nn.Embedding(config.vocab_size, config.dim)
 
         self.layers = torch.nn.ModuleList()
-        for layer_id in range(params.n_layers):
-            self.layers.append(Block(layer_id, params))
+        for layer_id in range(config.n_layers):
+            self.layers.append(Block(layer_id, config))
 
         # get class for normalization layers
-        self.norm = params.norm_type(
-            params.dim,
-            eps=params.norm_eps,
+        self.norm = norm_class(
+            config.dim,
+            eps=config.norm_eps,
         )
-        self.output = nn.Linear(params.dim, params.vocab_size, bias=False)
+        self.output = nn.Linear(config.dim, config.vocab_size, bias=False)
         if self.weight_tying:
             self.tok_embeddings.weight = self.output.weight
         self.grad_checkpointing = False
@@ -229,7 +230,7 @@ class Transformer(nn.Module, PyTorchModelHubMixin):
         # initialize weight 1/sqrt(dim)
         # this is 1/fan_in for output, as is default, and Maciej Kilian tried another option
         # for the embed layer (from RWKV paper) but this was better.
-        std = 1.0 / math.sqrt(params.dim)
+        std = 1.0 / math.sqrt(config.dim)
         torch.nn.init.trunc_normal_(self.output.weight, std=std, a=-3 * std, b=3 * std)
         torch.nn.init.trunc_normal_(
             self.tok_embeddings.weight, std=std, a=-3 * std, b=3 * std
@@ -261,9 +262,9 @@ class Transformer(nn.Module, PyTorchModelHubMixin):
         return self.output
 
 
-def create_params(args):
+def create_config(args):
     cfg = deepcopy(_MODEL_CONFIGS[args.model])
-    return Params(
+    return Config(
         dim=cfg["hidden_dim"],
         n_layers=cfg["n_layers"],
         n_heads=cfg["n_heads"],
@@ -271,7 +272,7 @@ def create_params(args):
         vocab_size=cfg["vocab_size"],
         post_embed_norm=cfg["post_embed_norm"],
         weight_tying=cfg["weight_tying"],
-        norm_type=get_norm_class(args.model_norm),
+        norm_type=cfg["norm_type"],
         apply_qk_norm=args.qk_norm,
         rotary_old=args.rotary_old,
         ffn_type=args.ffn_type,
@@ -279,4 +280,4 @@ def create_params(args):
 
 
 def create_model(args):
-    return Transformer(create_params(args))
+    return Transformer(create_config(args))
