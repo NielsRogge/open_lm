@@ -98,8 +98,9 @@ class CustomAttn(nn.Module):
         )
 
         # initialize norm layers for queries and keys if needed
+        norm_class = get_norm_class(args.norm_type)
         self.q_norm = (
-            args.norm_type(
+            norm_class(
                 args.n_heads * self.head_dim,
                 eps=args.norm_eps,
             )
@@ -107,7 +108,7 @@ class CustomAttn(nn.Module):
             else nn.Identity()
         )
         self.k_norm = (
-            args.norm_type(
+            norm_class(
                 args.n_heads * self.head_dim,
                 eps=args.norm_eps,
             )
@@ -156,11 +157,12 @@ class Block(nn.Module):
                 self._ff_w1, nn.GELU(approximate="none"), self._ff_w2
             )
         self.layer_id = layer_id
-        self.attention_norm = args.norm_type(
+        norm_class = get_norm_class(args.norm_type)
+        self.attention_norm = norm_class(
             args.dim,
             eps=args.norm_eps,
         )
-        self.ffn_norm = args.norm_type(
+        self.ffn_norm = norm_class(
             args.dim,
             eps=args.norm_eps,
         )
